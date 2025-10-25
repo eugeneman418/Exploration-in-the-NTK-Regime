@@ -34,7 +34,7 @@ def generate_uniform(n, lower, upper):
     x = (upper - lower) * x + lower
     return x
 
-hidden_dims = [int(2**i) for i in range(10,14)]
+hidden_dims = [int(2**i) for i in range(10,13)]
 
 
 lower, upper = -10, 10
@@ -42,7 +42,7 @@ grid_size = 10  # You can adjust this for higher resolution
 
 # Visualization for each hidden dimension
 for hidden_dim in hidden_dims:
-    ensemble = PriorEnsemble(2, hidden_dim, xavier=False)
+    ensemble = PriorEnsemble(2, hidden_dim, xavier=False) # variance of xavier decreases with hidden width
 
     # Generate a grid of points in the domain [lower, upper]^2
 
