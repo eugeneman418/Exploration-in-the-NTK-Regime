@@ -11,7 +11,7 @@ import utils
 
 
 class DetermineNet:
-    def __init__(self, in_dim, hidden_dim, out_dim, xavier=False):
+    def __init__(self, in_dim, hidden_dim, out_dim, determinism=True, xavier=False):
         self.net = nn.Sequential(
             nn.Linear(in_dim, hidden_dim),
             nn.Sigmoid(),
@@ -21,6 +21,7 @@ class DetermineNet:
             self.net.apply(utils.initize_xavier)
         self.init_net = copy.deepcopy(self.net)
         self.hidden_dim = hidden_dim
+        self.determinism = determinism
 
     def train(self, X, y, lr, steps, device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')):
         lr = lr / np.log10(self.hidden_dim) # normalize so we are in NTK regime
@@ -45,14 +46,14 @@ class DetermineNet:
             # whole training set at once to avoid stochastic GD
             optimizer.zero_grad()
             pred = self.net(X)
-            loss = criterion(pred, init_y - y)
+            loss = criterion(pred, init_y + y) if self.determinism else criterion(pred, y)
             loss.backward()
             optimizer.step()
             losses.append(loss.detach().cpu().item())
         self.net.eval()
         return losses
 
-    def inference(self, X, deterministic=True, device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')):
+    def inference(self, X, device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')):
         self.net.eval()
         self.init_net.eval()
         with torch.no_grad():
@@ -60,82 +61,108 @@ class DetermineNet:
             X = X.to(device)
             pred = self.net(X)
 
-            if deterministic:
+            if self.determinism:
                 self.init_net.to(device)
                 return pred - self.init_net(X)
             else:
                 return pred
 
+def ensemble_mean(ensemble, X, device):
+    preds = torch.stack([net.inference(X, device) for net in ensemble], dim=0)
+    return preds.mean(dim=0)
 
-hidden_dims = [int(2**i) for i in range(4,16)]
+
+def ensemble_variance(ensemble, X, device):
+    preds = torch.stack([net.inference(X, device) for net in ensemble], dim=0)
+    return preds.var(dim=0, unbiased=True)
+
+
+hidden_dims = [int(2**i) for i in range(4,12)]
 ensemble_size = 30
 lr = 1e-3
 steps = 100
 
-log_dir = "log/determine_net"
+# log_dir = "log/determine_net"
 X_train, X_test, y_train, _ = utils.load_data_to_tensor("data/yacht_hydro.csv", "Rr", random_seed=42)
 
 # out of distribution test
 X_test = 2*(torch.rand_like(X_test)-0.5)*500
 
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
 for hidden_dim in hidden_dims:
-    # reset seed
-    print(f"Starting ensemble training with hidden width {hidden_dim}")
-    torch.manual_seed(42)
-    np.random.seed(42)
+    print(f"\n==============================")
+    print(f"Hidden width: {hidden_dim}")
+    print(f"==============================")
 
-    losses = []
-    nondetermine_out = []
-    determine_out = []
+    results = {}
+    for determinism in [True, False]:
+        det_str = "Deterministic" if determinism else "Non-Deterministic"
+        print(f"\n--- Training {det_str} Ensemble ---")
 
-    for i in range(ensemble_size):
-        print(f"Training ensemble {i+1}/{ensemble_size}")
-        net = DetermineNet(6, hidden_dim,1, xavier=True) # with LeCunn I think numerical issues happens for smaller hidden weight already 
-        losses.append(net.train(X_train, y_train, lr, steps))
-        nondetermine_out.append(net.inference(X_test,False).cpu())
-        determine_out.append(net.inference(X_test, True).cpu())
+        torch.manual_seed(42)
+        np.random.seed(42)
 
-    losses_array = np.array(losses)  # Convert list of losses into a numpy array
-    mean_loss = np.mean(losses_array, axis=0)  # Compute mean loss across the ensemble
-    loss_variance = np.var(losses_array, axis=0)  # Compute variance of loss across the ensemble
+        losses = []
+        ensemble = []
 
+        for i in range(ensemble_size):
+            print(f"Training ensemble {i + 1}/{ensemble_size}")
+            net = DetermineNet(6, hidden_dim, 1, determinism=determinism, xavier=True)
+            losses.append(net.train(X_train, y_train, lr, steps, device))
+            ensemble.append(net)
+
+        losses_array = np.array(losses)
+        mean_loss = np.mean(losses_array, axis=0)
+        loss_var = np.var(losses_array, axis=0)
+
+        results[det_str] = {
+            "ensemble": ensemble,
+            "mean_loss": mean_loss,
+            "loss_var": loss_var
+        }
+
+        # Plot training losses
+        plt.figure(figsize=(10, 6))
+        plt.plot(mean_loss, label=f'{det_str} Mean Loss', linewidth=2)
+        plt.fill_between(
+            range(len(mean_loss)),
+            mean_loss - np.sqrt(loss_var),
+            mean_loss + np.sqrt(loss_var),
+            alpha=0.3,
+            label=f'{det_str} Loss Std'
+        )
+        plt.title(f"{det_str} Training Loss (Hidden Dim {hidden_dim})")
+        plt.xlabel("Training Step")
+        plt.ylabel("MSE Loss")
+        plt.legend()
+        plt.show()
+
+    # ======= Ensemble Prediction Comparison =======
+    print("\nComputing ensemble predictions...")
+
+    det_mean = ensemble_mean(results["Deterministic"]["ensemble"], X_test, device).cpu().squeeze()
+    det_var = ensemble_variance(results["Deterministic"]["ensemble"], X_test, device).cpu().squeeze()
+
+    nondet_mean = ensemble_mean(results["Non-Deterministic"]["ensemble"], X_test, device).cpu().squeeze()
+    nondet_var = ensemble_variance(results["Non-Deterministic"]["ensemble"], X_test, device).cpu().squeeze()
+
+    # --- Plot mean comparison ---
     plt.figure(figsize=(10, 6))
-    plt.plot(mean_loss, color='red', linewidth=2, label='Mean loss')
-    plt.fill_between(range(len(mean_loss)), mean_loss - np.sqrt(loss_variance), mean_loss + np.sqrt(loss_variance), color='orange', alpha=0.3, label='Loss variance')
-    plt.title(f"Training Losses with Variance for Hidden Dim {hidden_dim}")
-    plt.xlabel("Step")
-    plt.ylabel("MSE Loss")
-    plt.legend()
-    plt.show()
-
-    # 2. Compute variance at test points
-    determine_out_tensor = torch.stack(determine_out)  # shape: [ensemble_size, n_test, 1]
-    nondet_out_tensor = torch.stack(nondetermine_out)
-
-    determine_var = determine_out_tensor.var(dim=0)
-
-    nondet_var = nondet_out_tensor.var(dim=0)
-
-    # 3. Visualize variance at test points
-    plt.figure(figsize=(10, 6))
-    plt.plot(determine_var.squeeze(), label='Deterministic ensemble variance', marker='o')
-    plt.plot(nondet_var.squeeze(), label='Non-deterministic ensemble variance', marker='x')
-    plt.title(f"Ensemble Variance at Test Points (Hidden Dim {hidden_dim})")
+    plt.plot(det_mean, label="Deterministic Ensemble Mean", marker='o')
+    plt.plot(nondet_mean, label="Non-Deterministic Ensemble Mean", marker='x')
+    plt.title(f"Ensemble Mean Predictions Comparison (Hidden Dim {hidden_dim})")
     plt.xlabel("Test Sample Index")
-    plt.ylabel("Variance")
+    plt.ylabel("Mean Prediction")
     plt.legend()
     plt.show()
 
-    losses_df = pd.DataFrame(losses).transpose()  # Transpose so that each column is an ensemble member
-    losses_df.to_csv(f"{log_dir}/hidden_{hidden_dim}_losses.csv", index=False)
-
-    # Save predictions from the ensemble
-    determine_out_tensor = torch.cat(determine_out, dim=0).cpu().numpy()  # shape: [ensemble_size * n_test, 1]
-    nondet_out_tensor = torch.cat(nondetermine_out, dim=0).cpu().numpy()
-
-    # Save deterministic and non-deterministic outputs
-    determine_out_df = pd.DataFrame(determine_out_tensor)
-    determine_out_df.to_csv(f"{log_dir}/hidden_{hidden_dim}_det_out.csv", index=False)
-
-    nondet_out_df = pd.DataFrame(nondet_out_tensor)
-    nondet_out_df.to_csv(f"{log_dir}/hidden_{hidden_dim}_nondet_out.csv", index=False)
+    # --- Plot variance comparison ---
+    plt.figure(figsize=(10, 6))
+    plt.plot(det_var, label='Deterministic Ensemble Variance', marker='o')
+    plt.plot(nondet_var, label='Non-Deterministic Ensemble Variance', marker='x')
+    plt.title(f"Ensemble Variance Comparison (Hidden Dim {hidden_dim})")
+    plt.xlabel("Test Sample Index")
+    plt.ylabel("Prediction Variance")
+    plt.legend()
+    plt.show()

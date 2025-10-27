@@ -23,11 +23,17 @@ class PriorEnsemble:
             for net in self.nets:
                 net.apply(utils.initize_xavier)
 
+    def expectation(self, x):
+        predictions = torch.stack([net(x) for net in self.nets], dim=0)  # shape: [ensemble_size, batch_size, 1]
+        # Compute the mean across the ensemble
+        m = torch.mean(predictions, dim=0)  # variance along the ensemble dimension
+        return m
+
     def variance(self, x):
         predictions = torch.stack([net(x) for net in self.nets], dim=0)  # shape: [ensemble_size, batch_size, 1]
         # Compute the variance across the ensemble
-        variance = torch.var(predictions, unbiased=True, dim=0)  # variance along the ensemble dimension
-        return variance
+        v = torch.var(predictions, unbiased=True, dim=0)  # variance along the ensemble dimension
+        return v
 
 def generate_uniform(n, lower, upper):
     x = torch.rand((n,2))
