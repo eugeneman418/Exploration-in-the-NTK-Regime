@@ -8,6 +8,9 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import utils
+import os
+
+
 
 
 class DetermineNet:
@@ -90,6 +93,9 @@ X_test = 2*(torch.rand_like(X_test)-0.5)*500
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+graph_dir = "graphs"
+os.makedirs(graph_dir, exist_ok=True)
+
 for hidden_dim in hidden_dims:
     print(f"\n==============================")
     print(f"Hidden width: {hidden_dim}")
@@ -136,7 +142,9 @@ for hidden_dim in hidden_dims:
         plt.xlabel("Training Step")
         plt.ylabel("MSE Loss")
         plt.legend()
-        plt.show()
+        plt.tight_layout()
+        plt.savefig(f"{graph_dir}/{det_str}_training_loss_hidden{hidden_dim}.png")
+        plt.close()
 
     # ======= Ensemble Prediction Comparison =======
     print("\nComputing ensemble predictions...")
@@ -155,7 +163,10 @@ for hidden_dim in hidden_dims:
     plt.xlabel("Test Sample Index")
     plt.ylabel("Mean Prediction")
     plt.legend()
-    plt.show()
+    # Mean comparison plot
+    plt.tight_layout()
+    plt.savefig(f"{graph_dir}/ensemble_mean_comparison_hidden{hidden_dim}.png")
+    plt.close()
 
     # --- Plot variance comparison ---
     plt.figure(figsize=(10, 6))
@@ -165,4 +176,8 @@ for hidden_dim in hidden_dims:
     plt.xlabel("Test Sample Index")
     plt.ylabel("Prediction Variance")
     plt.legend()
-    plt.show()
+    # Variance comparison plot
+    plt.tight_layout()
+    plt.savefig(f"{graph_dir}/ensemble_variance_comparison_hidden{hidden_dim}.png")
+    plt.close()
+

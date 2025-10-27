@@ -40,10 +40,10 @@ def generate_uniform(n, lower, upper):
     x = (upper - lower) * x + lower
     return x
 
-hidden_dims = [int(2**i) for i in range(10,13)]
+hidden_dims = [int(2**i) for i in range(12,13)]
 
 
-lower, upper = -10, 10
+lower, upper = -100, 100
 grid_size = 10  # You can adjust this for higher resolution
 
 # Visualization for each hidden dimension
