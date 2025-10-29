@@ -10,11 +10,11 @@ class PriorEnsemble:
         self.nets = [
             nn.Sequential(
                 nn.Linear(in_dim, hidden_dim),
-                nn.ReLU(), # choice of ReLU is deliberate as it is an unbounded activation
+                nn.Tanh(), # choice of ReLU is deliberate as it is an unbounded activation
                 nn.Linear(hidden_dim, hidden_dim),
-                nn.ReLU(),
+                nn.Tanh(),
                 nn.Linear(hidden_dim, hidden_dim),
-                nn.ReLU(),
+                nn.Tanh(),
                 nn.Linear(hidden_dim, out_dim)
             )
             for _ in range(ensemble_size)
@@ -48,7 +48,7 @@ grid_size = 10  # You can adjust this for higher resolution
 
 # Visualization for each hidden dimension
 for hidden_dim in hidden_dims:
-    ensemble = PriorEnsemble(2, hidden_dim, xavier=False) # variance of xavier decreases with hidden width
+    ensemble = PriorEnsemble(2, hidden_dim) # variance of xavier decreases with hidden width
 
     # Generate a grid of points in the domain [lower, upper]^2
 

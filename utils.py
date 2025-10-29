@@ -63,3 +63,21 @@ def initize_xavier(m):
         # Bias from same distribution (same covariance)
         if m.bias is not None:
             nn.init.normal_(m.bias, mean=0.0, std=std)
+
+
+def ensemble_mean(ensemble, X, device):
+    X = X.to(device)
+    preds = []
+    for net in ensemble:
+        preds.append(net(X))
+    preds = torch.stack(preds, dim=0)
+    return preds.mean(dim=0)
+
+
+def ensemble_variance(ensemble, X, device):
+    X = X.to(device)
+    preds = []
+    for net in ensemble:
+        preds.append(net(X))
+    preds = torch.stack(preds, dim=0)
+    return preds.var(dim=0, unbiased=True)

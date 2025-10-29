@@ -79,7 +79,6 @@ def ensemble_variance(ensemble, X, device):
     preds = torch.stack([net.inference(X, device) for net in ensemble], dim=0)
     return preds.var(dim=0, unbiased=True)
 
-
 hidden_dims = [int(2**i) for i in range(4,12)]
 ensemble_size = 30
 lr = 1e-3
