@@ -109,14 +109,18 @@ class RndEnsemble:
         return ensemble_losses
 
 hidden_dims = [8192]
-ensemble_size = 30
+ensemble_size = 100
 lr = 1e-3
-steps = 100
+steps = 10
 
-X_train, X_test, y_train, _ = utils.load_data_to_tensor("data/yacht_hydro.csv", "Rr", random_seed=42)
+# the problem with this dataset is that RND converged but the original network hasn't. Something that can't be explained by NTK
+# RND tends to underestimate when it converges before the ensemble
+#X_train, X_test, y_train, _ = utils.load_data_to_tensor("data/yacht_hydro.csv", "Rr", random_seed=42)
+X_train = torch.rand(size=(1000,2))
+y_train = X_train[:,0] + X_train[:,1] - 2*X_train[:,0]*X_train[:,1] # XOR
 
 # out of distribution test
-X_test = 2*(torch.rand_like(X_test)-0.5)*500
+X_test = 2*(torch.rand(size=(100,2))-0.5)*500
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -129,7 +133,7 @@ for hidden_dim in hidden_dims:
     torch.manual_seed(42)
     np.random.seed(42)
 
-    deep_ensemble = DeepEnsemble(6, hidden_dim, 1, ensemble_size)
+    deep_ensemble = DeepEnsemble(2, hidden_dim, 1, ensemble_size)
     ensemble_losses = deep_ensemble.train(X_train, y_train, lr, steps)
     ensemble_mean_loss = np.mean(ensemble_losses, axis=0)
     ensemble_std_loss = np.std(ensemble_mean_loss, axis=0, ddof=1)
@@ -154,7 +158,7 @@ for hidden_dim in hidden_dims:
     torch.manual_seed(42)
     np.random.seed(42)
 
-    rnd_ensemble = RndEnsemble(6, hidden_dim, 1, ensemble_size)
+    rnd_ensemble = RndEnsemble(2, hidden_dim, 1, ensemble_size)
     rnd_losses = rnd_ensemble.train(X_train,lr,steps)
     rnd_mean_loss = np.mean(rnd_losses, axis=0)
     rnd_std_loss = np.std(rnd_mean_loss, axis=0, ddof=1)
@@ -173,14 +177,51 @@ for hidden_dim in hidden_dims:
     plt.legend()
     plt.show()
 
+    # Compute Deep Ensemble variance
+    ensemble_test_variance = utils.ensemble_variance(deep_ensemble.nets, X_test, device).detach().cpu().squeeze()
 
-    ensemble_test_variance = utils.ensemble_variance(deep_ensemble.nets, X_test, device).detach().cpu()
-    rnd_test_mean = utils.ensemble_mean(rnd_ensemble.nets, X_test, device).detach().cpu()
+    # Compute mean and std across RND ensemble
+    rnd_mean = utils.ensemble_mean(rnd_ensemble.nets, X_test, device).detach().squeeze().cpu().numpy()
+    rnd_std = utils.ensemble_variance(rnd_ensemble.nets, X_test, device).pow(0.5).detach().squeeze().cpu().numpy()
 
+    plt.figure(figsize=(12, 6))
 
+    # Plot RND ensemble mean as a blue line
+    plt.plot(
+        np.arange(len(X_test)),
+        rnd_mean,
+        color='blue',
+        label='RND Ensemble Mean',
+        linewidth=2
+    )
 
-    plt.plot(ensemble_test_variance, label="Deep Ensemble Variance")
-    plt.plot(rnd_test_mean, label="RND Prediction")
-    plt.legend()
+    # Shaded region for ±1 std
+    plt.fill_between(
+        np.arange(len(X_test)),
+        rnd_mean - rnd_std,
+        rnd_mean + rnd_std,
+        color='blue',
+        alpha=0.2,
+        label='RND Ensemble ±1 Std'
+    )
+
+    # Scatter Deep Ensemble variance as red dots
+    plt.scatter(
+        np.arange(len(X_test)),
+        ensemble_test_variance.numpy(),
+        color='red',
+        label='Deep Ensemble Variance',
+        s=30,
+        alpha=0.8
+    )
+
+    plt.title("Deep Ensemble Variance vs. RND Ensemble Mean ± Std")
+    plt.xlabel("Test Samples")
+    plt.ylabel("Variance / Prediction")
+
+    # Clean look: no x-ticks
+    plt.xticks([], [])
+
+    plt.legend(loc='upper right')
+    plt.tight_layout()
     plt.show()
-    print((ensemble_test_variance / rnd_test_mean).mean())
